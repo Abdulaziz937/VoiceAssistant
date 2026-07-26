@@ -1,5 +1,5 @@
 // ============================================================
-// app.js — منطق الشات بوت الصوتي (معدل لـ Cohere)
+// app.js — منطق الشات بوت الصوتي (يعمل في المتصفح)
 // ============================================================
 
 const micBtn = document.getElementById("micBtn");
@@ -7,8 +7,9 @@ const micIcon = document.getElementById("micIcon");
 const chatLog = document.getElementById("chatLog");
 const statusText = document.getElementById("statusText");
 
-// توجيه الطلب إلى ملف ro.php الموجود في نفس المجلد
-const BACKEND_URL = "ro.php";
+// عنوان الخادم الخلفي الذي يستدعي Gemini بأمان (انظر api/chat.php)
+// مسار نسبي حتى يعمل تلقائيًا مهما كان اسم النطاق على InfinityFree
+const BACKEND_URL = "api/ro.php";
 
 // اللغة المستخدمة للتعرف على الصوت وللنطق
 const LANG = "ar-SA";
@@ -68,8 +69,7 @@ if (!SpeechRecognitionAPI) {
     const thinkingEl = addMessage("bot", "...يفكر", { thinking: true });
 
     try {
-      // تم تعديل اسم الدالة هنا 
-      const reply = await askCohere(userText);
+      const reply = await askGemini(userText);
       thinkingEl.remove();
       addMessage("bot", reply);
       speak(reply);
@@ -82,14 +82,14 @@ if (!SpeechRecognitionAPI) {
 }
 
 // --------------------------------------------------------
-// 2) الاتصال بالخادم الخلفي الذي يستدعي Cohere
+// 2) الاتصال بالخادم الخلفي الذي يستدعي Gemini
+//    (لا نستدعي Gemini مباشرة من المتصفح لحماية مفتاح الـ API)
 // --------------------------------------------------------
-async function askCohere(userText) {
+async function askGemini(prompt) {
   const res = await fetch(BACKEND_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // التعديل الأول: إرسال النص تحت اسم "message" ليتوافق مع speak.php
-    body: JSON.stringify({ message: userText }),
+    body: JSON.stringify({ prompt }),
   });
 
   if (!res.ok) {
@@ -97,9 +97,7 @@ async function askCohere(userText) {
   }
 
   const data = await res.json();
-  
-  // التعديل الثاني: استخراج الرد من المتغير "data.text" الخاص بـ Cohere
-  return data.text || "لم يصل رد من الخادم.";
+  return data.reply || "لم يصل رد من الخادم.";
 }
 
 // --------------------------------------------------------
