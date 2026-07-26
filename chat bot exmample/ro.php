@@ -1,76 +1,98 @@
 <?php
-// ============================================================
-// api/chat.php — يستقبل النص من app.js ويستدعي Gemini API بأمان
-// (بديل PHP عن server.js لأن InfinityFree لا تدعم Node.js)
-// ============================================================
 
 header('Content-Type: application/json; charset=utf-8');
 
 require __DIR__ . '/../config.php';
 
-// اسمح فقط بطلبات POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(['error' => 'الطريقة غير مسموحة']);
+    echo json_encode(['error' => 'غير مسموحة']);
     exit;
 }
 
-$input  = json_decode(file_get_contents('php://input'), true);
-$prompt = isset($input['prompt']) ? trim($input['prompt']) : '';
+$input = json_decode(file_get_contents('php://input'), true);
+$prompt = trim($input['prompt'] ?? '');
 
 if ($prompt === '') {
     http_response_code(400);
-    echo json_encode(['error' => 'الرجاء إرسال نص صالح في الحقل prompt']);
+    echo json_encode(['error' => 'الرجاء إدخال رسالة']);
     exit;
+    
 }
 
-if (!defined('GEMINI_API_KEY') || GEMINI_API_KEY === '') {
+if (!defined('OPENROUTER_API_KEY')) {
     http_response_code(500);
-    echo json_encode(['error' => 'لم يتم ضبط مفتاح Gemini في config.php بعد']);
+    echo json_encode(['error' => 'لم يتم العثور على مفتاح OpenRouter']);
     exit;
 }
 
-$model = 'gemini-2.0-flash';
-$url   = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key=" . GEMINI_API_KEY;
 
-$body = json_encode([
-    'contents' => [
-        ['parts' => [['text' => $prompt]]],
-    ],
-]);
+$url = "https://openrouter.ai/api/v1/chat/completions";
 
-$ch = curl_init($url);
-curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_POST           => true,
-    CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-    CURLOPT_POSTFIELDS     => $body,
-    CURLOPT_TIMEOUT        => 25,
-    CURLOPT_SSL_VERIFYPEER => true,
-]);
+$models = [
+    "google/gemma-3-4b-it:free",
+    "openai/gpt-oss-20b:free",
+    "inclusionai/ling-3.0-flash:free",
+    "cohere/north-mini:free"
+];
 
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$curlErr  = curl_error($ch);
-curl_close($ch);
+$reply = null;
 
-// بعض حسابات InfinityFree المجانية تُظهر خطأ SSL (cURL error 60).
-// إذا واجهت هذا الخطأ فعّل السطرين التاليين مؤقتًا (غير موصى به على المدى الطويل):
-// curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-// curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+foreach ($models as $model) {
 
-if ($response === false) {
-    http_response_code(502);
-    echo json_encode(['error' => 'فشل الاتصال بـ Gemini API: ' . $curlErr]);
+    $data = [
+        "model" => $model,
+        "messages" => [
+            [
+                "role" => "user",
+                "content" => $prompt
+            ]
+        ]
+    ];
+
+    $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
+
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => [
+            "Authorization: Bearer " . OPENROUTER_API_KEY,
+            "Content-Type: application/json"
+        ],
+        CURLOPT_POSTFIELDS => json_encode($data),
+        CURLOPT_TIMEOUT => 30
+    ]);
+
+    $response = curl_exec($ch);
+
+    if (curl_errno($ch)) {
+        curl_close($ch);
+        continue;
+    }
+
+    $http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    if ($http != 200) {
+        continue;
+    }
+
+    $result = json_decode($response, true);
+
+    if (isset($result['choices'][0]['message']['content'])) {
+        $reply = $result['choices'][0]['message']['content'];
+        break;
+    }
+}
+
+if ($reply === null) {
+    echo json_encode([
+        "error" => "جميع النماذج المجانية غير متاحة حالياً."
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-$data = json_decode($response, true);
-
-if ($httpCode >= 400) {
-    http_response_code(502);
-    echo json_encode(['error' => 'رفض Gemini API الطلب', 'details' => $data]);
-    exit;
-}
-
-$reply = $data['candidates'][0]['content']['parts'][0]['text'] ?? 'تعذر الحصول على رد
+echo json_encode([
+    "reply" => $reply
+], JSON_UNESCAPED_UNICODE);
